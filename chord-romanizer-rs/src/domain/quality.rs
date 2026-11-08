@@ -472,6 +472,19 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
                 segment_cursor = &segment_cursor[consumed..];
                 continue;
             }
+            if let Some(rest) = segment_cursor.strip_prefix('7') {
+                // A bare seventh completes the base quality. It must be
+                // handled before the generic added-degree reader; explicit
+                // add7 remains an added natural seventh above.
+                let seventh = if quality.class == QualityClass::Diminished {
+                    SeventhQuality::Diminished
+                } else {
+                    SeventhQuality::Minor
+                };
+                quality.seventh.get_or_insert(seventh);
+                segment_cursor = rest;
+                continue;
+            }
             if let Some((degree, alteration, consumed)) = altered_degree(segment_cursor, "") {
                 // An unaltered bare degree in a modifier position is an added
                 // tone. Only extension bases (`9`, `11`, `13`) create implied
@@ -486,11 +499,6 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
                     },
                 });
                 segment_cursor = &segment_cursor[consumed..];
-                continue;
-            }
-            if let Some(rest) = segment_cursor.strip_prefix('7') {
-                quality.seventh = Some(SeventhQuality::Minor);
-                segment_cursor = rest;
                 continue;
             }
             // Stop at the first unknown remainder. Skipping characters in hope
