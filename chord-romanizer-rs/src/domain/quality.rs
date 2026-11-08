@@ -448,7 +448,10 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
     let mut in_parentheses = false;
     let mut omission_list = false;
     for chunk in remainder.split_inclusive([',', '(', ')']) {
-        let delimiter = chunk.chars().last().filter(|ch| matches!(ch, ',' | '(' | ')'));
+        let delimiter = chunk
+            .chars()
+            .last()
+            .filter(|ch| matches!(ch, ',' | '(' | ')'));
         let segment = delimiter.map_or(chunk, |ch| chunk.strip_suffix(ch).unwrap());
         let mut inherit_omission = in_parentheses && omission_list;
 

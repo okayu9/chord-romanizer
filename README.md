@@ -15,6 +15,8 @@ python -m pip install chord-romanizer
 Python 3.8以上に対応しています。新しく解析を始める場合は、修正版の規則を使う
 `Romanizer.strict()`を利用してください。
 
+StrictV1の構成音と追加音・省略音の規則は[構成音の説明](docs/STRICT_CHORD_FORMULAS.md)を参照してください。
+
 ## 3分で使う
 
 ### 1. 調を指定してローマ数字へ変換する
