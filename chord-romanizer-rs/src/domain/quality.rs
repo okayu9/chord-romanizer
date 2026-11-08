@@ -322,7 +322,19 @@ fn parse_base(compact: &str) -> ParsedBase<'_> {
             &[],
         ),
         ("sus2", QualityClass::Suspended2, None, &[]),
+        (
+            "sus49",
+            QualityClass::Suspended4,
+            Some(SeventhQuality::Minor),
+            &[ChordDegree::Ninth],
+        ),
         ("sus4", QualityClass::Suspended4, None, &[]),
+        (
+            "aug9",
+            QualityClass::Augmented,
+            Some(SeventhQuality::Minor),
+            &[ChordDegree::Ninth],
+        ),
         ("aug", QualityClass::Augmented, None, &[]),
         ("dim", QualityClass::Diminished, None, &[]),
         (
