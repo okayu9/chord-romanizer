@@ -443,24 +443,29 @@ fn parse_base(compact: &str) -> ParsedBase<'_> {
 }
 
 fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
-    // Parentheses and commas are presentation choices, not semantic grouping
-    // for the supported grammar. Normalize both to a simple token stream.
-    let normalized = remainder.replace(['(', ')'], ",");
-    let mut cursor = normalized.as_str();
-    while !cursor.is_empty() {
-        cursor = cursor.trim_start_matches(',');
-        if cursor.is_empty() {
-            break;
-        }
-
-        let end = cursor.find(',').unwrap_or(cursor.len());
-        let segment = &cursor[..end];
-        cursor = &cursor[end..];
+    // Retain group boundaries so an omit/no list cannot leak into a later
+    // parenthesis. Ordinary chained modifiers still consume from the left.
+    let mut in_parentheses = false;
+    let mut omission_list = false;
+    for chunk in remainder.split_inclusive([',', '(', ')']) {
+        let delimiter = chunk.chars().last().filter(|ch| matches!(ch, ',' | '(' | ')'));
+        let segment = delimiter.map_or(chunk, |ch| chunk.strip_suffix(ch).unwrap());
+        let mut inherit_omission = in_parentheses && omission_list;
 
         // A segment may contain chained modifiers such as "add9omit3". Consume
         // from the left so every recognized token records its exact role.
         let mut segment_cursor = segment;
         while !segment_cursor.is_empty() {
+            if inherit_omission {
+                inherit_omission = false;
+                if let Some((degree, consumed)) = parse_degree_number(segment_cursor) {
+                    quality.omissions.push(degree);
+                    segment_cursor = &segment_cursor[consumed..];
+                    continue;
+                }
+            }
+            // A new explicit command/alteration ends inherited omission scope.
+            omission_list = false;
             if let Some(rest) = segment_cursor.strip_prefix("sus2") {
                 set_suspension(quality, QualityClass::Suspended2);
                 segment_cursor = rest;
@@ -473,6 +478,7 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
             }
             if let Some((degree, consumed)) = prefixed_degree(segment_cursor, &["omit", "no"]) {
                 quality.omissions.push(degree);
+                omission_list = in_parentheses;
                 segment_cursor = &segment_cursor[consumed..];
                 continue;
             }
@@ -528,6 +534,18 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
             // trustworthy.
             quality.unknown_tokens.push(segment_cursor.to_owned());
             break;
+        }
+        match delimiter {
+            Some('(') => {
+                in_parentheses = true;
+                omission_list = false;
+            }
+            Some(')') => {
+                in_parentheses = false;
+                omission_list = false;
+            }
+            Some(',') if !in_parentheses => omission_list = false,
+            _ => {}
         }
     }
 }
