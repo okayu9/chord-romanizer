@@ -28,16 +28,7 @@ pub fn parse_chord(symbol: &str) -> Result<ParsedSymbol, ParseError> {
         });
     }
 
-    // The first slash is the structural separator. A second slash remains in
-    // `bass` and fails note parsing rather than being silently discarded.
-    let (body, bass_token) = if let Some((body, bass)) = text.split_once('/') {
-        let bass = bass.trim();
-        let parsed =
-            SpelledNote::parse(bass).map_err(|_| ParseError::InvalidBass(bass.to_owned()))?;
-        (body, Some((bass, parsed)))
-    } else {
-        (text, None)
-    };
+    let (body, bass_token) = split_bass(text)?;
 
     let body = body.trim();
     if body.is_empty() {
@@ -82,6 +73,70 @@ pub fn parse_chord(symbol: &str) -> Result<ParsedSymbol, ParseError> {
         bass,
         bass_lexeme,
     }))
+}
+
+fn split_bass(text: &str) -> Result<(&str, Option<(&str, SpelledNote)>), ParseError> {
+    // A terminal (/E) or (onE) is a bass annotation, not a quality modifier.
+    // Require a complete note and no other structural bass separator.
+    if let Some(without_close) = text.strip_suffix(')') {
+        if let Some((body, group)) = without_close.rsplit_once('(') {
+            if let Some(bass) = group.strip_prefix('/').or_else(|| group.strip_prefix("on")) {
+                if structural_slash(body).is_none() {
+                    let bass = bass.trim();
+                    let parsed = SpelledNote::parse(bass)
+                        .map_err(|_| ParseError::InvalidBass(bass.to_owned()))?;
+                    return Ok((body, Some((bass, parsed))));
+                }
+            }
+        }
+    }
+    // Skip only a recognized basic 6/9. Any further slash remains in the
+    // bass token and fails note parsing instead of being silently discarded.
+    if let Some(position) = structural_slash(text) {
+        let bass = text[position + 1..].trim();
+        let parsed =
+            SpelledNote::parse(bass).map_err(|_| ParseError::InvalidBass(bass.to_owned()))?;
+        Ok((&text[..position], Some((bass, parsed))))
+    } else {
+        Ok((text, None))
+    }
+}
+
+fn structural_slash(text: &str) -> Option<usize> {
+    text.match_indices('/')
+        .map(|(position, _)| position)
+        .find(|position| !is_six_nine_separator(text, *position))
+}
+
+fn is_six_nine_separator(text: &str, position: usize) -> bool {
+    let prefix = &text[..position];
+    if !prefix
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    let Some(after_nine) = text[position + 1..].strip_prefix('9') else {
+        return false;
+    };
+    if !(after_nine.is_empty() || after_nine.starts_with(['(', ',', '/'])) {
+        return false;
+    }
+    let root_end = prefix
+        .char_indices()
+        .skip(1)
+        .take_while(|(_, ch)| matches!(ch, '#' | 'b' | 'B' | 'x' | 'X'))
+        .last()
+        .map_or(1, |(index, ch)| index + ch.len_utf8());
+    if root_end > prefix.len() {
+        return false;
+    }
+    let quality = prefix[root_end..].replace(' ', "");
+    matches!(
+        quality.as_str(),
+        "6" | "m6" | "min6" | "M6" | "maj6" | "Maj6" | "MAJ6"
+    )
 }
 
 fn normalize_spelling(token: &str) -> String {

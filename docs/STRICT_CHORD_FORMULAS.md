@@ -38,3 +38,29 @@ Run the Rust regressions with:
 ```sh
 cargo test --manifest-path chord-romanizer-rs/Cargo.toml
 ```
+
+## Additional notation aliases
+
+StrictV1 recognizes `Maj7`, `△7`, bare `M`, `M6`, and `mM9` spellings,
+`+9` / `+11` / `+13` in modifier positions, bare `sus` as `sus4`,
+postfix `7aug`, and major-seventh modifiers such as `augM7` and `(M7)`.
+`C+7` still denotes an augmented triad with a minor seventh. Conflicting
+explicit seventh qualities such as `C7(M7)` remain indeterminate.
+
+The `omit` command takes precedence over the diminished alias `o`.
+`no3rd`, `omitroot`, and a single grouped addition such as `add(b13)`
+are recognized. An added altered degree stays distinct from an alteration:
+`Cadd(b5)` retains natural 5, while `C(b5)` replaces it.
+
+The basic quality `6/9` is recognized before splitting a slash bass;
+`C6/9/G`, `C7(/E)`, and `G(onA)` retain their separately specified bass.
+Original input and quality spellings remain available in the parsed AST.
+
+Recognition never joins a quality accidental to the root: `AMb13` is
+an A major triad with b13, not an Ab dominant thirteenth. Unsupported
+degree 12 is not silently split into degrees 1 and 2. Performance suffixes
+(`C>`, `C----`), ambiguous `C-`, shorthand `Csus9`, and `alt` are not
+removed or assigned an arbitrary chord formula.
+
+The additional regressions include a fixed set of 797 reviewed spellings
+with expected degree identity, root, and bass, plus contrasting inputs.

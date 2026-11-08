@@ -117,8 +117,8 @@ impl ChordQuality {
         // colon (`B:7/D#`, `C#:m7`). The colon is presentation syntax rather
         // than part of the quality, so ignore one leading separator for
         // analysis while retaining `raw` for lossless rendering.
-        let semantic = compact.strip_prefix(':').unwrap_or(&compact);
-        let (class, seventh, implied_extensions, remainder) = parse_base(semantic);
+        let semantic = normalize_quality_aliases(compact.strip_prefix(':').unwrap_or(&compact));
+        let (class, seventh, implied_extensions, remainder) = parse_base(&semantic);
         let mut parsed = Self {
             raw: raw.to_owned(),
             class,
@@ -134,6 +134,79 @@ impl ChordQuality {
     pub fn is_fully_recognized(&self) -> bool {
         self.class != QualityClass::Unknown && self.unknown_tokens.is_empty()
     }
+}
+
+fn normalize_quality_aliases(text: &str) -> String {
+    // Only recognition spellings change; ChordQuality::raw remains untouched.
+    let mut normalized = text
+        .replace("MAJ", "maj")
+        .replace("Maj", "maj")
+        .replace("Sus", "sus");
+    for symbol in ['△', 'Δ'] {
+        for degree in [7, 9, 11, 13] {
+            normalized = normalized.replace(&format!("{symbol}{degree}"), &format!("M{degree}"));
+        }
+    }
+    for (alias, canonical) in [
+        ("minmaj", "minMaj"),
+        ("mmaj", "mMaj"),
+        ("mM", "mMaj"),
+        ("major", "maj"),
+    ] {
+        if let Some(rest) = normalized.strip_prefix(alias) {
+            if ["7", "9", "11", "13"]
+                .iter()
+                .any(|degree| rest.starts_with(degree))
+            {
+                normalized = format!("{canonical}{rest}");
+                break;
+            }
+        }
+    }
+    for (alias, canonical) in [("minor", "min"), ("maj6", "6"), ("M6", "6")] {
+        if let Some(rest) = normalized.strip_prefix(alias) {
+            normalized = format!("{canonical}{rest}");
+            break;
+        }
+    }
+    if let Some(rest) = normalized.strip_prefix('M') {
+        if rest.is_empty()
+            || rest.starts_with(['(', '#', 'b'])
+            || ["add", "sus", "omit"]
+                .iter()
+                .any(|token| rest.starts_with(token))
+        {
+            normalized = rest.to_owned();
+        }
+    }
+    for prefix in ["6/9", "m6/9", "min6/9"] {
+        if let Some(rest) = normalized.strip_prefix(prefix) {
+            if rest.is_empty() || rest.starts_with(['(', ',']) {
+                normalized = format!("{}6(9){rest}", prefix.strip_suffix("6/9").unwrap());
+                break;
+            }
+        }
+    }
+    // Keep add(b5) as an Added modifier; turning it into (b5) would erase 5.
+    let mut output = String::new();
+    let mut cursor = normalized.as_str();
+    while let Some(start) = cursor.find("add(") {
+        output.push_str(&cursor[..start]);
+        cursor = &cursor[start..];
+        if let Some(end) = cursor.find(')') {
+            let inner = &cursor[4..end];
+            if altered_degree(inner, "").is_some_and(|(_, _, length)| length == inner.len()) {
+                output.push_str("add");
+                output.push_str(inner);
+                cursor = &cursor[end + 1..];
+                continue;
+            }
+        }
+        output.push_str("add(");
+        cursor = &cursor[4..];
+    }
+    output.push_str(cursor);
+    output
 }
 
 type ParsedBase<'a> = (
@@ -321,6 +394,12 @@ fn parse_base(compact: &str) -> ParsedBase<'_> {
             Some(SeventhQuality::Minor),
             &[],
         ),
+        (
+            "ø",
+            QualityClass::HalfDiminished,
+            Some(SeventhQuality::Minor),
+            &[],
+        ),
         ("sus2", QualityClass::Suspended2, None, &[]),
         (
             "sus49",
@@ -425,9 +504,18 @@ fn parse_base(compact: &str) -> ParsedBase<'_> {
     if compact.is_empty() {
         return (QualityClass::Major, None, Vec::new(), "");
     }
+    // The command omit must win over the diminished-triad alias o.
+    if compact.starts_with("omit") {
+        return (QualityClass::Major, None, Vec::new(), compact);
+    }
     for (prefix, class, seventh, extensions) in bases {
         if let Some(remainder) = compact.strip_prefix(prefix) {
             return (*class, *seventh, implied(extensions), remainder);
+        }
+    }
+    if let Some(rest) = compact.strip_prefix("sus") {
+        if rest.is_empty() || rest.starts_with(['7', '(', ',']) {
+            return (QualityClass::Suspended4, None, Vec::new(), rest);
         }
     }
     // A suffix may consist only of modifiers (`Cadd9`, `C(b5)`). Such forms use
@@ -478,6 +566,52 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
                 set_suspension(quality, QualityClass::Suspended4);
                 segment_cursor = rest;
                 continue;
+            }
+            if let Some(rest) = segment_cursor.strip_prefix("sus") {
+                if rest.is_empty() || rest.starts_with('7') {
+                    set_suspension(quality, QualityClass::Suspended4);
+                    segment_cursor = rest;
+                    continue;
+                }
+            }
+            if let Some((extension, consumed)) = major_extension(segment_cursor) {
+                // Conflicting explicit seventh qualities need a caller decision.
+                if quality
+                    .seventh
+                    .is_some_and(|seventh| seventh != SeventhQuality::Major)
+                {
+                    quality.unknown_tokens.push(segment_cursor.to_owned());
+                    break;
+                }
+                quality.seventh = Some(SeventhQuality::Major);
+                for degree in [
+                    ChordDegree::Ninth,
+                    ChordDegree::Eleventh,
+                    ChordDegree::Thirteenth,
+                ] {
+                    if degree.number() <= extension {
+                        quality.modifiers.push(DegreeModifier {
+                            degree,
+                            alteration: 0,
+                            kind: ModifierKind::Implied,
+                        });
+                    }
+                }
+                segment_cursor = &segment_cursor[consumed..];
+                continue;
+            }
+            if let Some(rest) = segment_cursor.strip_prefix("aug") {
+                if quality.seventh.is_some()
+                    && matches!(quality.class, QualityClass::Major | QualityClass::Augmented)
+                {
+                    quality.modifiers.push(DegreeModifier {
+                        degree: ChordDegree::Fifth,
+                        alteration: 1,
+                        kind: ModifierKind::Altered,
+                    });
+                    segment_cursor = rest;
+                    continue;
+                }
             }
             if let Some((degree, consumed)) = prefixed_degree(segment_cursor, &["omit", "no"]) {
                 quality.omissions.push(degree);
@@ -577,8 +711,30 @@ fn set_suspension(quality: &mut ChordQuality, suspension: QualityClass) {
 fn prefixed_degree(text: &str, prefixes: &[&str]) -> Option<(ChordDegree, usize)> {
     for prefix in prefixes {
         if let Some(rest) = text.strip_prefix(prefix) {
+            if rest.starts_with("root") {
+                return Some((ChordDegree::Root, prefix.len() + "root".len()));
+            }
             let (degree, length) = parse_degree_number(rest)?;
-            return Some((degree, prefix.len() + length));
+            let ordinal = if degree == ChordDegree::Third && rest[length..].starts_with("rd") {
+                2
+            } else {
+                0
+            };
+            return Some((degree, prefix.len() + length + ordinal));
+        }
+    }
+    None
+}
+
+fn major_extension(text: &str) -> Option<(u8, usize)> {
+    for prefix in ["maj", "M"] {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            for extension in [13_u8, 11, 9, 7] {
+                let token = extension.to_string();
+                if rest.starts_with(&token) {
+                    return Some((extension, prefix.len() + token.len()));
+                }
+            }
         }
     }
     None
@@ -591,6 +747,12 @@ fn altered_degree(text: &str, prefix: &str) -> Option<(ChordDegree, i8, usize)> 
     while let Some(first) = rest.chars().next() {
         match first {
             '#' => alteration += 1,
+            '+' if ["5", "9", "11", "13"]
+                .iter()
+                .any(|degree| rest[1..].starts_with(degree)) =>
+            {
+                alteration += 1
+            }
             // `7-5` is a common flat-five spelling in MIDI chord markers.
             // Treat the minus sign as an accidental only in this modifier
             // position; the untouched raw quality remains `7-5`.
@@ -605,6 +767,10 @@ fn altered_degree(text: &str, prefix: &str) -> Option<(ChordDegree, i8, usize)> 
 }
 
 fn parse_degree_number(text: &str) -> Option<(ChordDegree, usize)> {
+    // Twelve is an unsupported compound degree, not the two commands 1 and 2.
+    if text.starts_with("12") {
+        return None;
+    }
     for number in [13_u8, 11, 9, 7, 6, 5, 4, 3, 2, 1] {
         let token = number.to_string();
         if text.starts_with(&token) {
