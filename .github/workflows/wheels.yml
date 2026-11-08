@@ -3,7 +3,7 @@ name: Build native wheels
 on:
   pull_request:
   push:
-    branches: [main, master]
+    branches: [main, master, "fix/strict-v1-*"]
     tags: ["v*"]
   workflow_dispatch:
 
