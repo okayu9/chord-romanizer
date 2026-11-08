@@ -405,6 +405,7 @@ fn parse_base(compact: &str) -> ParsedBase<'_> {
         ("7", QualityClass::Major, Some(SeventhQuality::Minor), &[]),
         ("6", QualityClass::Major, None, &[ChordDegree::Sixth]),
         ("5", QualityClass::Power, None, &[]),
+        ("+5", QualityClass::Augmented, None, &[]),
         ("+", QualityClass::Augmented, None, &[]),
         ("o", QualityClass::Diminished, None, &[]),
     ];
@@ -470,6 +471,15 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
                     kind: ModifierKind::Added,
                 });
                 segment_cursor = &segment_cursor[consumed..];
+                continue;
+            }
+            if let Some(rest) = segment_cursor.strip_prefix("+5") {
+                quality.modifiers.push(DegreeModifier {
+                    degree: ChordDegree::Fifth,
+                    alteration: 1,
+                    kind: ModifierKind::Altered,
+                });
+                segment_cursor = rest;
                 continue;
             }
             if let Some(rest) = segment_cursor.strip_prefix('7') {
