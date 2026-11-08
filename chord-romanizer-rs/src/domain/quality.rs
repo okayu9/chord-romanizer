@@ -450,12 +450,12 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
         let mut segment_cursor = segment;
         while !segment_cursor.is_empty() {
             if let Some(rest) = segment_cursor.strip_prefix("sus2") {
-                quality.class = QualityClass::Suspended2;
+                set_suspension(quality, QualityClass::Suspended2);
                 segment_cursor = rest;
                 continue;
             }
             if let Some(rest) = segment_cursor.strip_prefix("sus4") {
-                quality.class = QualityClass::Suspended4;
+                set_suspension(quality, QualityClass::Suspended4);
                 segment_cursor = rest;
                 continue;
             }
@@ -518,6 +518,27 @@ fn parse_modifiers(remainder: &str, quality: &mut ChordQuality) {
             break;
         }
     }
+}
+
+fn set_suspension(quality: &mut ChordQuality, suspension: QualityClass) {
+    // Suspension replaces the third, not a fifth already specified by the
+    // augmented/diminished base. Carry that fifth into the modifier list.
+    let alteration = match quality.class {
+        QualityClass::Augmented => Some(1),
+        QualityClass::Diminished | QualityClass::HalfDiminished => Some(-1),
+        _ => None,
+    };
+    if let Some(alteration) = alteration {
+        let fifth = DegreeModifier {
+            degree: ChordDegree::Fifth,
+            alteration,
+            kind: ModifierKind::Altered,
+        };
+        if !quality.modifiers.contains(&fifth) {
+            quality.modifiers.push(fifth);
+        }
+    }
+    quality.class = suspension;
 }
 
 fn prefixed_degree(text: &str, prefixes: &[&str]) -> Option<(ChordDegree, usize)> {
